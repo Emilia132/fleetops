@@ -11,7 +11,7 @@ const db = {
   async del(table, id) { await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${id}`, { method:"DELETE", headers:H }); }
 };
 
-const TIPOS = ["Excavadora","Grúa","Camión","Compactadora","Retroexcavadora","Motoniveladora","Vehículo liviano","Generador"];
+const TIPOS = ["Excavadora","Grúa","Camión","Compactadora","Retroexcavadora","Motoniveladora","Vehículo liviano","Generador","Volquete","Semirremolque","Bomba de hormigón","Minicargadora","Cilindro vibratorio","Pluma articulada","Montacargas","Grupo electrógeno","Compresor","Otro"];
 const ESTADOS = ["Operativo","En mantenimiento","Fuera de servicio","Disponible"];
 const ROLES_INFO = {
   maquinista:    {label:"Maquinista",   emoji:"👷",color:"#166534",bg:"#dcfce7"},
@@ -140,6 +140,24 @@ function GestionObras({obras,recargar,user}){
   </div>;
 }
 
+// Formulario de usuario extraído como componente independiente para evitar el bug de re-render
+function FormUsuario({esN, form, setForm, conf2, setConf2, show, setShow, err, load, onGuardar, onCancelar}){
+  return <div style={{background:"#f8fafc",borderRadius:12,padding:16,border:"1.5px solid #e2e8f0",marginBottom:16}}>
+    <h4 style={{margin:"0 0 14px",fontSize:14,fontWeight:700,color:"#1e3a5f"}}>{esN?"➕ Nuevo usuario":"✏️ Editar usuario"}</h4>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+      <div><label style={LS}>Nombre completo *</label><input value={form.nombre} onChange={e=>setForm(p=>({...p,nombre:e.target.value}))} placeholder="Ej: Carlos Méndez" style={FS}/></div>
+      <div><label style={LS}>Usuario *</label><input value={form.usuario} onChange={e=>setForm(p=>({...p,usuario:e.target.value.replace(/\s/,"")}))} placeholder="Ej: carlos" autoCapitalize="none" style={FS}/></div>
+    </div>
+    <div style={{marginBottom:10}}><label style={LS}>Rol</label><select value={form.rol} onChange={e=>setForm(p=>({...p,rol:e.target.value}))} style={FS}>{Object.entries(ROLES_INFO).map(([k,v])=><option key={k} value={k}>{v.emoji} {v.label}</option>)}</select></div>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+      <div><label style={LS}>{esN?"Clave *":"Nueva clave (vacío = no cambiar)"}</label><div style={{position:"relative"}}><input type={show?"text":"password"} value={form.clave} onChange={e=>setForm(p=>({...p,clave:e.target.value}))} placeholder="Mín. 4 caracteres" style={{...FS,paddingRight:36}}/><button onClick={()=>setShow(p=>!p)} style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",fontSize:13,color:"#9ca3af"}}>{show?"🙈":"👁"}</button></div></div>
+      <div><label style={LS}>Confirmar clave</label><input type={show?"text":"password"} value={conf2} onChange={e=>setConf2(e.target.value)} placeholder="Repetí la clave" style={FS}/></div>
+    </div>
+    {err&&<p style={{color:"#ef4444",fontSize:12,margin:"0 0 10px"}}>{err}</p>}
+    <div style={{display:"flex",gap:8}}><button onClick={onGuardar} disabled={load} style={{...BP,opacity:load?0.7:1}}>✓ {esN?"Crear":"Guardar"}</button><button onClick={onCancelar} style={BS}>Cancelar</button></div>
+  </div>;
+}
+
 function GestionUsuarios({usuarios,recargar,user}){
   const V={nombre:"",usuario:"",clave:"",rol:"maquinista"};
   const[modo,setModo]=useState(null);const[form,setForm]=useState(V);const[conf2,setConf2]=useState("");const[show,setShow]=useState(false);const[err,setErr]=useState("");const[confElim,setConfElim]=useState(null);const[ok,setOk]=useState("");const[load,setLoad]=useState(false);
@@ -147,26 +165,12 @@ function GestionUsuarios({usuarios,recargar,user}){
   const val=esN=>{if(!form.nombre.trim())return"Nombre obligatorio.";if(!form.usuario.trim())return"Usuario obligatorio.";const dup=usuarios.find(u=>u.usuario.toLowerCase()===form.usuario.trim().toLowerCase()&&u.id!==modo);if(dup)return"Ese usuario ya existe.";if(esN||form.clave){if(form.clave.length<4)return"Clave mínimo 4 caracteres.";if(form.clave!==conf2)return"Las claves no coinciden.";}return null;};
   const guardar=async esN=>{const e=val(esN);if(e){setErr(e);return;}setLoad(true);const d={nombre:form.nombre.trim(),usuario:form.usuario.trim().toLowerCase(),rol:form.rol,...(form.clave?{clave:form.clave}:{})};if(esN){await db.insert("usuarios",{...d,clave:form.clave});await logH(user,"Usuario creado",`${d.nombre} (@${d.usuario}) · ${ROLES_INFO[d.rol].label}`);}else{await db.update("usuarios",modo,d);await logH(user,"Usuario editado",`${d.nombre} (@${d.usuario})${form.clave?" · clave actualizada":""}`);}await recargar();exito("✓ Guardado");setModo(null);setForm(V);setConf2("");setErr("");setLoad(false);};
   const eliminar=async u=>{if(u.id===user.id){setErr("No podés eliminarte a vos mismo.");return;}setLoad(true);await db.del("usuarios",u.id);await logH(user,"Usuario eliminado",`${u.nombre} (@${u.usuario})`);await recargar();exito("✓ Eliminado");setConfElim(null);setLoad(false);};
-  const FormU=({esN})=><div style={{background:"#f8fafc",borderRadius:12,padding:16,border:"1.5px solid #e2e8f0",marginBottom:16}}>
-    <h4 style={{margin:"0 0 14px",fontSize:14,fontWeight:700,color:"#1e3a5f"}}>{esN?"➕ Nuevo usuario":"✏️ Editar usuario"}</h4>
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
-      <div><label style={LS}>Nombre completo *</label><input value={form.nombre} onChange={e=>{setForm(p=>({...p,nombre:e.target.value}));setErr("");}} placeholder="Ej: Carlos Méndez" style={FS}/></div>
-      <div><label style={LS}>Usuario *</label><input value={form.usuario} onChange={e=>{setForm(p=>({...p,usuario:e.target.value.replace(/\s/,"")}));setErr("");}} placeholder="Ej: carlos" autoCapitalize="none" style={FS}/></div>
-    </div>
-    <div style={{marginBottom:10}}><label style={LS}>Rol</label><select value={form.rol} onChange={e=>setForm(p=>({...p,rol:e.target.value}))} style={FS}>{Object.entries(ROLES_INFO).map(([k,v])=><option key={k} value={k}>{v.emoji} {v.label}</option>)}</select></div>
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
-      <div><label style={LS}>{esN?"Clave *":"Nueva clave (vacío = no cambiar)"}</label><div style={{position:"relative"}}><input type={show?"text":"password"} value={form.clave} onChange={e=>{setForm(p=>({...p,clave:e.target.value}));setErr("");}} placeholder="Mín. 4 caracteres" style={{...FS,paddingRight:36}}/><button onClick={()=>setShow(p=>!p)} style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",fontSize:13,color:"#9ca3af"}}>{show?"🙈":"👁"}</button></div></div>
-      <div><label style={LS}>Confirmar clave</label><input type={show?"text":"password"} value={conf2} onChange={e=>{setConf2(e.target.value);setErr("");}} placeholder="Repetí la clave" style={FS}/></div>
-    </div>
-    {err&&<p style={{color:"#ef4444",fontSize:12,margin:"0 0 10px"}}>{err}</p>}
-    <div style={{display:"flex",gap:8}}><button onClick={()=>guardar(esN)} disabled={load} style={{...BP,opacity:load?0.7:1}}>✓ {esN?"Crear":"Guardar"}</button><button onClick={()=>{setModo(null);setErr("");setConf2("");}} style={BS}>Cancelar</button></div>
-  </div>;
   return<div>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}><h3 style={{margin:0,fontSize:15,fontWeight:700,color:"#1e3a5f"}}>👥 Gestión de usuarios</h3>{!modo&&<button onClick={()=>{setModo("nuevo");setForm(V);setConf2("");setErr("");}} style={{...BP,width:"auto",padding:"8px 16px",fontSize:13}}>+ Nuevo usuario</button>}</div>
     <p style={{fontSize:13,color:"#6b7280",marginTop:4,marginBottom:16}}>Creá y administrá los accesos de cada persona.</p>
     {ok&&<div style={{background:"#dcfce7",border:"1px solid #bbf7d0",borderRadius:10,padding:"10px 14px",fontSize:13,color:"#166534",fontWeight:600,marginBottom:14}}>{ok}</div>}
-    {modo==="nuevo"&&<FormU esN={true}/>}
-    <div style={{display:"grid",gap:10}}>{usuarios.map(u=>{const info=ROLES_INFO[u.rol];const esYo=u.id===user.id;return<div key={u.id}>{modo===u.id&&<FormU esN={false}/>}{modo!==u.id&&<div style={{background:"#fff",borderRadius:12,border:`1.5px solid ${esYo?"#a5b4fc":"#e5e7eb"}`,padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
+    {modo==="nuevo"&&<FormUsuario esN={true} form={form} setForm={setForm} conf2={conf2} setConf2={setConf2} show={show} setShow={setShow} err={err} load={load} onGuardar={()=>guardar(true)} onCancelar={()=>{setModo(null);setErr("");setConf2("");}}/>}
+    <div style={{display:"grid",gap:10}}>{usuarios.map(u=>{const info=ROLES_INFO[u.rol];const esYo=u.id===user.id;return<div key={u.id}>{modo===u.id&&<FormUsuario esN={false} form={form} setForm={setForm} conf2={conf2} setConf2={setConf2} show={show} setShow={setShow} err={err} load={load} onGuardar={()=>guardar(false)} onCancelar={()=>{setModo(null);setErr("");setConf2("");}}/>}{modo!==u.id&&<div style={{background:"#fff",borderRadius:12,border:`1.5px solid ${esYo?"#a5b4fc":"#e5e7eb"}`,padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
       <div style={{display:"flex",alignItems:"center",gap:12,flex:1,minWidth:0}}><div style={{width:40,height:40,borderRadius:12,background:info.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>{info.emoji}</div><div><div style={{fontWeight:700,fontSize:14,color:"#111"}}>{u.nombre}{esYo&&<span style={{fontSize:11,color:"#6b21a8",fontWeight:600,marginLeft:6}}>(vos)</span>}</div><div style={{fontSize:12,color:"#9ca3af",marginTop:1}}>@{u.usuario} · <RolTag rol={u.rol}/></div></div></div>
       <div style={{display:"flex",gap:6,flexShrink:0}}>
         <button onClick={()=>{setModo(u.id);setForm({nombre:u.nombre,usuario:u.usuario,clave:"",rol:u.rol});setConf2("");setErr("");}} style={{padding:"6px 12px",background:"#f3f4f6",border:"none",borderRadius:8,fontSize:12,fontWeight:600,cursor:"pointer",color:"#374151"}}>✏️ Editar</button>
@@ -204,16 +208,47 @@ function EquipoCard({equipo,obras,onClick}){
   </div>;
 }
 
+function SemaforoFechas({equipo}){
+  const diffDias=(a,b)=>{if(!a||!b)return null;return Math.round((new Date(b)-new Date(a))/(1000*60*60*24));};
+  const semaforo=(plan,real,tipo)=>{
+    if(!plan||!real)return null;
+    const diff=diffDias(plan,real);
+    if(diff===null)return null;
+    const atraso=tipo==="inicio"?diff>0:diff>0;
+    const color=Math.abs(diff)===0?"#22c55e":Math.abs(diff)<=3?"#eab308":"#ef4444";
+    const bg=Math.abs(diff)===0?"#dcfce7":Math.abs(diff)<=3?"#fef9c3":"#fee2e2";
+    const texto=diff===0?"✅ En fecha":`${diff>0?"⚠ Atraso":"🟢 Adelanto"} ${Math.abs(diff)} día${Math.abs(diff)!==1?"s":""}`;
+    return{color,bg,texto,diff};
+  };
+  const si=semaforo(equipo.fecha_inicio_plan,equipo.fecha_inicio_real,"inicio");
+  const sf=semaforo(equipo.fecha_fin_plan,equipo.fecha_fin_real,"fin");
+  const fmt=f=>f?new Date(f+"T00:00:00").toLocaleDateString("es-AR",{day:"2-digit",month:"2-digit",year:"numeric"}):"-";
+  return<div style={{background:"#f8fafc",borderRadius:12,padding:14,border:"1px solid #e2e8f0"}}>
+    <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:12}}>📅 Control de fechas</div>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+      {[{label:"Inicio",plan:equipo.fecha_inicio_plan,real:equipo.fecha_inicio_real,s:si},{label:"Fin",plan:equipo.fecha_fin_plan,real:equipo.fecha_fin_real,s:sf}].map(({label,plan,real,s})=>(
+        <div key={label} style={{background:"#fff",borderRadius:10,padding:10,border:"1px solid #e5e7eb"}}>
+          <div style={{fontSize:11,fontWeight:700,color:"#9ca3af",marginBottom:6}}>{label}</div>
+          <div style={{fontSize:12,color:"#374151",marginBottom:2}}>📌 Plan: <b>{fmt(plan)}</b></div>
+          <div style={{fontSize:12,color:"#374151",marginBottom:s?8:0}}>✅ Real: <b>{fmt(real)}</b></div>
+          {s&&<div style={{background:s.bg,color:s.color,borderRadius:8,padding:"4px 8px",fontSize:11,fontWeight:700,display:"inline-block"}}>{s.texto}</div>}
+          {!s&&(plan||real)&&<div style={{background:"#f3f4f6",color:"#9ca3af",borderRadius:8,padding:"4px 8px",fontSize:11,display:"inline-block"}}>⏳ Pendiente</div>}
+        </div>
+      ))}
+    </div>
+  </div>;
+}
+
 function DetalleEquipo({equipo,obras,user,onClose,recargar}){
   const rol=user.rol;const obra=obras.find(o=>o.id===equipo.obra_id);
   const[tab,setTab]=useState("info");const[editando,setEditando]=useState(false);
-  const[campos,setCampos]=useState({responsable:equipo.responsable,obra_id:equipo.obra_id,estado:equipo.estado,observaciones:equipo.observaciones,horas_uso:equipo.horas_uso});
+  const[campos,setCampos]=useState({responsable:equipo.responsable,obra_id:equipo.obra_id,estado:equipo.estado,observaciones:equipo.observaciones,horas_uso:equipo.horas_uso,fecha_inicio_plan:equipo.fecha_inicio_plan||"",fecha_fin_plan:equipo.fecha_fin_plan||"",fecha_inicio_real:equipo.fecha_inicio_real||"",fecha_fin_real:equipo.fecha_fin_real||""});
   const[regs,setRegs]=useState(equipo.registros||[]);const[fallas,setFallas]=useState(equipo.fallas||[]);
   const[showCi,setShowCi]=useState(false);const[ci,setCi]=useState({tipo:"entrada",observaciones:"",fotoNombre:""});
   const fRef=useRef();const[showFalla,setShowFalla]=useState(false);const[nf,setNf]=useState({descripcion:"",prioridad:"Media",reportado_por:user.nombre});
   const[notas,setNotas]=useState({});const[load,setLoad]=useState(false);
 
-  const guardar=async()=>{setLoad(true);const d={responsable:campos.responsable,obra_id:Number(campos.obra_id),estado:campos.estado,observaciones:campos.observaciones,horas_uso:Number(campos.horas_uso)};await db.update("equipos",equipo.id,d);if(campos.estado!==equipo.estado)await logH(user,"Estado actualizado",`[${equipo.codigo}] "${equipo.estado}" → "${campos.estado}"`);if(campos.responsable!==equipo.responsable)await logH(user,"Responsable asignado",`[${equipo.codigo}] "${equipo.responsable||"ninguno"}" → "${campos.responsable||"ninguno"}"`);if(Number(campos.obra_id)!==equipo.obra_id)await logH(user,"Datos editados",`[${equipo.codigo}] Obra → "${obras.find(o=>o.id===Number(campos.obra_id))?.nombre}"`);await recargar();setEditando(false);setLoad(false);};
+  const guardar=async()=>{setLoad(true);const d={responsable:campos.responsable,obra_id:Number(campos.obra_id),estado:campos.estado,observaciones:campos.observaciones,horas_uso:Number(campos.horas_uso),fecha_inicio_plan:campos.fecha_inicio_plan,fecha_fin_plan:campos.fecha_fin_plan,fecha_inicio_real:campos.fecha_inicio_real,fecha_fin_real:campos.fecha_fin_real};await db.update("equipos",equipo.id,d);if(campos.estado!==equipo.estado)await logH(user,"Estado actualizado",`[${equipo.codigo}] "${equipo.estado}" → "${campos.estado}"`);if(campos.responsable!==equipo.responsable)await logH(user,"Responsable asignado",`[${equipo.codigo}] "${equipo.responsable||"ninguno"}" → "${campos.responsable||"ninguno"}"`);if(Number(campos.obra_id)!==equipo.obra_id)await logH(user,"Datos editados",`[${equipo.codigo}] Obra → "${obras.find(o=>o.id===Number(campos.obra_id))?.nombre}"`);await recargar();setEditando(false);setLoad(false);};
   const guardarCi=async()=>{setLoad(true);const r=await db.insert("registros_estado",{equipo_id:equipo.id,tipo:ci.tipo,observaciones:ci.observaciones,foto_nombre:ci.fotoNombre,cargado_por:user.nombre,rol});setRegs(p=>[...p,...(Array.isArray(r)?r:[r])]);await logH(user,"Check-in registrado",`[${equipo.codigo}] ${ci.tipo==="entrada"?"Recepción":"Devolución"}${ci.fotoNombre?` · 📷 ${ci.fotoNombre}`:""}`);if(ci.fotoNombre)await logH(user,"Foto cargada",`[${equipo.codigo}] ${ci.tipo==="entrada"?"Estado inicial":"Estado final"}: ${ci.fotoNombre}`);setCi({tipo:"entrada",observaciones:"",fotoNombre:""});setShowCi(false);setLoad(false);};
   const guardarFalla=async()=>{if(!nf.descripcion.trim())return;setLoad(true);const fecha=new Date().toLocaleDateString("es-AR");const r=await db.insert("fallas",{equipo_id:equipo.id,descripcion:nf.descripcion,prioridad:nf.prioridad,estado:"Pendiente",reportado_por:nf.reportado_por,nota_mecanico:"",fecha});setFallas(p=>[...p,...(Array.isArray(r)?r:[r])]);await logH(user,"Falla reportada",`[${equipo.codigo}] "${nf.descripcion}" · ${nf.prioridad}`);setNf({descripcion:"",prioridad:"Media",reportado_por:user.nombre});setShowFalla(false);setLoad(false);};
   const updFalla=async(id,estado)=>{setLoad(true);const nota=notas[id]||"";const falla=fallas.find(f=>f.id===id);await db.update("fallas",id,{estado,...(nota?{nota_mecanico:nota}:{})});setFallas(p=>p.map(f=>f.id===id?{...f,estado,nota_mecanico:nota||f.nota_mecanico}:f));await logH(user,"Falla actualizada",`[${equipo.codigo}] "${falla.descripcion}" → ${estado}${nota?` · "${nota}"`:""}` );setNotas(p=>({...p,[id]:""}));setLoad(false);};
@@ -232,16 +267,41 @@ function DetalleEquipo({equipo,obras,user,onClose,recargar}){
         <div><label style={LS}>Responsable</label><input value={campos.responsable} onChange={e=>setCampos(p=>({...p,responsable:e.target.value}))} style={FS}/></div>
         <div><label style={LS}>Horas de uso</label><input type="number" value={campos.horas_uso} onChange={e=>setCampos(p=>({...p,horas_uso:e.target.value}))} style={FS}/></div>
         <div><label style={LS}>Observaciones</label><textarea value={campos.observaciones} onChange={e=>setCampos(p=>({...p,observaciones:e.target.value}))} rows={3} style={{...FS,resize:"vertical"}}/></div>
+        <div style={{background:"#f0f9ff",borderRadius:10,padding:12,border:"1px solid #bae6fd"}}>
+          <div style={{fontSize:12,fontWeight:700,color:"#0369a1",marginBottom:10}}>📅 Fechas planificadas (admin)</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <div><label style={LS}>Inicio planificado</label><input type="date" value={campos.fecha_inicio_plan} onChange={e=>setCampos(p=>({...p,fecha_inicio_plan:e.target.value}))} style={FS}/></div>
+            <div><label style={LS}>Fin planificado</label><input type="date" value={campos.fecha_fin_plan} onChange={e=>setCampos(p=>({...p,fecha_fin_plan:e.target.value}))} style={FS}/></div>
+          </div>
+        </div>
+        <div style={{background:"#f0fdf4",borderRadius:10,padding:12,border:"1px solid #bbf7d0"}}>
+          <div style={{fontSize:12,fontWeight:700,color:"#166534",marginBottom:10}}>📅 Fechas reales</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <div><label style={LS}>Inicio real</label><input type="date" value={campos.fecha_inicio_real} onChange={e=>setCampos(p=>({...p,fecha_inicio_real:e.target.value}))} style={FS}/></div>
+            <div><label style={LS}>Fin real</label><input type="date" value={campos.fecha_fin_real} onChange={e=>setCampos(p=>({...p,fecha_fin_real:e.target.value}))} style={FS}/></div>
+          </div>
+        </div>
         <div style={{display:"flex",gap:8}}><button onClick={guardar} disabled={load} style={{...BP,opacity:load?0.7:1}}>✓ Guardar</button><button onClick={()=>setEditando(false)} style={BS}>Cancelar</button></div>
       </div>:<div style={{display:"grid",gap:10,marginBottom:16}}>
         {[{l:"Estado",v:<Badge estado={equipo.estado}/>},{l:"Obra",v:`📍 ${obra?.nombre||"Sin asignar"}`},{l:"Responsable",v:`👷 ${equipo.responsable||"Sin asignar"}`}].map(({l,v})=><div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",background:"#f8fafc",borderRadius:10}}><span style={{fontSize:13,color:"#6b7280",fontWeight:600}}>{l}</span><span style={{fontSize:13,fontWeight:600,color:"#111"}}>{v}</span></div>)}
         {equipo.observaciones&&<div style={{background:"#fffbeb",borderRadius:10,padding:"10px 14px",border:"1px solid #fde68a",fontSize:13,color:"#78350f"}}>📝 {equipo.observaciones}</div>}
+        {/* Semáforo de fechas */}
+        {(equipo.fecha_inicio_plan||equipo.fecha_fin_plan||equipo.fecha_inicio_real||equipo.fecha_fin_real)&&<SemaforoFechas equipo={equipo}/>}
         {puede.editarDatos(rol)&&<button onClick={()=>setEditando(true)} style={{...BS,width:"100%",border:"1.5px solid #1e3a5f",color:"#1e3a5f"}}>✏️ Editar datos</button>}
       </div>}
     </div>}
 
     {tab==="estado"&&<div>
       <p style={{fontSize:13,color:"#6b7280",marginTop:0,marginBottom:16}}>{puede.cargarFotos(rol)?"Registrá el estado del equipo al entregarlo o recibirlo.":"Historial de registros de estado."}</p>
+      {/* Fechas reales - maquinista y admin */}
+      {(rol==="maquinista"||rol==="administrador")&&<div style={{background:"#f0fdf4",borderRadius:12,padding:14,border:"1px solid #bbf7d0",marginBottom:16}}>
+        <div style={{fontSize:12,fontWeight:700,color:"#166534",marginBottom:10}}>📅 Registrar fechas reales de uso</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+          <div><label style={LS}>Fecha inicio real</label><input type="date" value={campos.fecha_inicio_real} onChange={e=>setCampos(p=>({...p,fecha_inicio_real:e.target.value}))} style={FS}/></div>
+          <div><label style={LS}>Fecha fin real</label><input type="date" value={campos.fecha_fin_real} onChange={e=>setCampos(p=>({...p,fecha_fin_real:e.target.value}))} style={FS}/></div>
+        </div>
+        <button onClick={async()=>{setLoad(true);await db.update("equipos",equipo.id,{fecha_inicio_real:campos.fecha_inicio_real,fecha_fin_real:campos.fecha_fin_real});await logH(user,"Fechas actualizadas",`[${equipo.codigo}] Inicio real: ${campos.fecha_inicio_real||"-"} · Fin real: ${campos.fecha_fin_real||"-"}`);await recargar();setLoad(false);}} disabled={load} style={{...BP,background:"#166534",opacity:load?0.7:1,fontSize:13,padding:"9px"}}>✓ Guardar fechas reales</button>
+      </div>}
       {puede.cargarFotos(rol)&&!showCi&&<button onClick={()=>setShowCi(true)} style={{...BP,marginBottom:20}}>+ Nuevo registro de estado</button>}
       {puede.cargarFotos(rol)&&showCi&&<div style={{background:"#f8fafc",borderRadius:12,padding:16,marginBottom:20,border:"1.5px solid #e2e8f0"}}>
         <div style={{marginBottom:12}}><label style={LS}>Tipo</label><div style={{display:"flex",gap:8}}>{[{id:"entrada",label:"📥 Recepción (estado inicial)"},{id:"salida",label:"📤 Devolución (estado final)"}].map(t=><button key={t.id} onClick={()=>setCi(p=>({...p,tipo:t.id}))} style={{flex:1,padding:"9px 6px",borderRadius:8,border:`2px solid ${ci.tipo===t.id?"#1e3a5f":"#e5e7eb"}`,background:ci.tipo===t.id?"#1e3a5f":"#fff",color:ci.tipo===t.id?"#fff":"#374151",fontWeight:600,fontSize:12,cursor:"pointer"}}>{t.label}</button>)}</div></div>
@@ -367,7 +427,11 @@ export default function App(){
     {showNEq&&<Modal title="Agregar nuevo equipo" onClose={()=>setShowNEq(false)}>
       <div style={{display:"grid",gap:12}}>
         {[{l:"Código *",k:"codigo",ph:"Ej: EXC-015"},{l:"Nombre *",k:"nombre",ph:"Ej: Excavadora Caterpillar 325"},{l:"Responsable",k:"responsable",ph:"Nombre del maquinista"},{l:"Horas de uso",k:"horas_uso",t:"number"},{l:"Último service",k:"ultimo_service",t:"date"},{l:"Observaciones",k:"observaciones",ph:"Opcional..."}].map(({l,k,ph,t})=><div key={k}><label style={LS}>{l}</label><input type={t||"text"} value={nEq[k]} onChange={e=>setNEq(p=>({...p,[k]:e.target.value}))} placeholder={ph} style={FS}/></div>)}
-        <div><label style={LS}>Tipo</label><select value={nEq.tipo} onChange={e=>setNEq(p=>({...p,tipo:e.target.value}))} style={FS}>{TIPOS.map(t=><option key={t}>{t}</option>)}</select></div>
+        <div>
+          <label style={LS}>Tipo</label>
+          <select value={TIPOS.includes(nEq.tipo)?nEq.tipo:"Otro"} onChange={e=>setNEq(p=>({...p,tipo:e.target.value==="Otro"?"":e.target.value}))} style={FS}>{TIPOS.map(t=><option key={t}>{t}</option>)}</select>
+          {(!TIPOS.includes(nEq.tipo)||nEq.tipo===""||nEq.tipo==="Otro")&&<input value={nEq.tipo==="Otro"?"":nEq.tipo} onChange={e=>setNEq(p=>({...p,tipo:e.target.value}))} placeholder="Escribí el tipo (ej: Volquete articulado)" style={{...FS,marginTop:8}}/>}
+        </div>
         <div><label style={LS}>Obra asignada</label><select value={nEq.obra_id} onChange={e=>setNEq(p=>({...p,obra_id:Number(e.target.value)}))} style={FS}>{obras.map(o=><option key={o.id} value={o.id}>{o.nombre}</option>)}</select></div>
         <button onClick={agregarEq} style={BP}>✓ Agregar equipo</button>
       </div>
