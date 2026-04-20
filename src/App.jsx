@@ -506,7 +506,7 @@ function PlanificacionView({equipos,obras,onVerEquipo}){
 export default function App(){
   const[user,setUser]=useState(null);const[obras,setObras]=useState([]);const[usuarios,setUsuarios]=useState([]);const[equipos,setEquipos]=useState([]);const[hist,setHist]=useState([]);const[load,setLoad]=useState(true);
   const[vista,setVista]=useState("tablero");const[busq,setBusq]=useState("");const[fEst,setFEst]=useState("Todos");const[fObra,setFObra]=useState("Todas");const[eqSel,setEqSel]=useState(null);const[showNEq,setShowNEq]=useState(false);
-  const[nEq,setNEq]=useState({codigo:"",nombre:"",tipo:TIPOS[0],obra_id:1,estado:"Disponible",responsable:"",horas_uso:0,ultimo_service:"",observaciones:""});
+  const[nEq,setNEq]=useState({codigo:"",nombre:"",tipo:TIPOS[0],obra_id:null,estado:"Disponible",responsable:"",horas_uso:0,ultimo_service:"",observaciones:""});
 
   const cargarObras=async()=>{const d=await db.get("obras");setObras(Array.isArray(d)?d:[]);};
   const cargarUsuarios=async()=>{const d=await db.get("usuarios");setUsuarios(Array.isArray(d)?d:[]);};
@@ -522,16 +522,16 @@ export default function App(){
 
   const agregarEq=async()=>{
     if(!nEq.codigo||!nEq.nombre)return;
-    const res=await db.insert("equipos",{...nEq,horas_uso:Number(nEq.horas_uso),obra_id:Number(nEq.obra_id)});
+    const res=await db.insert("equipos",{...nEq,horas_uso:Number(nEq.horas_uso),obra_id:nEq.obra_id||null});
     const eq=Array.isArray(res)?res[0]:res;
-    // Crear asignación inicial
-    if(eq?.id){
+    // Crear asignación inicial solo si tiene obra asignada
+    if(eq?.id&&nEq.obra_id){
       const obraActual=obras.find(o=>o.id===Number(nEq.obra_id));
       await db.insert("asignaciones",{equipo_id:eq.id,equipo_codigo:nEq.codigo,equipo_nombre:nEq.nombre,obra_id:Number(nEq.obra_id),obra_nombre:obraActual?.nombre||"",fecha_inicio_plan:"",fecha_fin_plan:"",fecha_inicio_real:"",fecha_fin_real:"",dias_demora:null,cerrada:false});
     }
-    await logH(user,"Equipo agregado",`${nEq.codigo} · ${nEq.nombre}`);
+    await logH(user,"Equipo agregado",`${nEq.codigo} · ${nEq.nombre}${nEq.obra_id?"":" · Sin obra asignada"}`);
     await cargarEquipos();setShowNEq(false);
-    setNEq({codigo:"",nombre:"",tipo:TIPOS[0],obra_id:1,estado:"Disponible",responsable:"",horas_uso:0,ultimo_service:"",observaciones:""});
+    setNEq({codigo:"",nombre:"",tipo:TIPOS[0],obra_id:null,estado:"Disponible",responsable:"",horas_uso:0,ultimo_service:"",observaciones:""});
   };
 
   if(!user)return<LoginModal onLogin={setUser}/>;
@@ -594,9 +594,10 @@ export default function App(){
           <select value={TIPOS.includes(nEq.tipo)?nEq.tipo:"Otro"} onChange={e=>setNEq(p=>({...p,tipo:e.target.value==="Otro"?"":e.target.value}))} style={FS}>{TIPOS.map(t=><option key={t}>{t}</option>)}</select>
           {(!TIPOS.includes(nEq.tipo)||nEq.tipo===""||nEq.tipo==="Otro")&&<input value={nEq.tipo==="Otro"?"":nEq.tipo} onChange={e=>setNEq(p=>({...p,tipo:e.target.value}))} placeholder="Escribí el tipo (ej: Volquete articulado)" style={{...FS,marginTop:8}}/>}
         </div>
-        <div><label style={LS}>Obra asignada</label><select value={nEq.obra_id} onChange={e=>setNEq(p=>({...p,obra_id:Number(e.target.value)}))} style={FS}>{obras.map(o=><option key={o.id} value={o.id}>{o.nombre}</option>)}</select></div>
+        <div><label style={LS}>Obra asignada <span style={{color:"#9ca3af",fontWeight:400}}>(opcional)</span></label><select value={nEq.obra_id||""} onChange={e=>setNEq(p=>({...p,obra_id:e.target.value?Number(e.target.value):null}))} style={FS}><option value="">— Sin asignar (disponible) —</option>{obras.map(o=><option key={o.id} value={o.id}>{o.nombre}</option>)}</select></div>
         <button onClick={agregarEq} style={BP}>✓ Agregar equipo</button>
       </div>
     </Modal>}
   </div>;
 }
+
