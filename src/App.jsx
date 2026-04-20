@@ -253,25 +253,40 @@ function DetalleEquipo({equipo,obras,user,onClose,recargar}){
     setLoad(true);
     const obraChanged = Number(campos.obra_id)!==equipo.obra_id;
     const d={responsable:campos.responsable,obra_id:Number(campos.obra_id),estado:campos.estado,observaciones:campos.observaciones,horas_uso:Number(campos.horas_uso),fecha_inicio_plan:campos.fecha_inicio_plan,fecha_fin_plan:campos.fecha_fin_plan,fecha_inicio_real:campos.fecha_inicio_real,fecha_fin_real:campos.fecha_fin_real};
-    // Si cambia de obra: cerrar asignación anterior y abrir nueva
+
+    // Buscar asignación activa
+    const asigActiva = await db.get("asignaciones",`&equipo_id=eq.${equipo.id}&cerrada=eq.false`);
+    const hayAsigActiva = Array.isArray(asigActiva) && asigActiva.length > 0;
+
     if(obraChanged){
-      // Cerrar asignación activa anterior
-      const asigActiva=await db.get("asignaciones",`&equipo_id=eq.${equipo.id}&cerrada=eq.false`);
-      if(Array.isArray(asigActiva)&&asigActiva.length>0){
+      // Cerrar asignación anterior si existe
+      if(hayAsigActiva){
         const a=asigActiva[0];
         const diffDias=(x,y)=>x&&y?Math.round((new Date(y)-new Date(x))/(1000*60*60*24)):null;
-        const demora=diffDias(a.fecha_fin_plan,equipo.fecha_fin_real);
+        const demora=diffDias(a.fecha_fin_plan, campos.fecha_fin_real||equipo.fecha_fin_real);
         await db.update("asignaciones",a.id,{cerrada:true,fecha_inicio_real:equipo.fecha_inicio_real||"",fecha_fin_real:equipo.fecha_fin_real||"",dias_demora:demora});
       }
       // Abrir nueva asignación
       const obraNueva=obras.find(o=>o.id===Number(campos.obra_id));
-      await db.insert("asignaciones",{equipo_id:equipo.id,equipo_codigo:equipo.codigo,equipo_nombre:equipo.nombre,obra_id:Number(campos.obra_id),obra_nombre:obraNueva?.nombre||"",fecha_inicio_plan:campos.fecha_inicio_plan,fecha_fin_plan:campos.fecha_fin_plan,fecha_inicio_real:"",fecha_fin_real:"",cerrada:false});
+      await db.insert("asignaciones",{equipo_id:equipo.id,equipo_codigo:equipo.codigo,equipo_nombre:equipo.nombre,obra_id:Number(campos.obra_id),obra_nombre:obraNueva?.nombre||"",fecha_inicio_plan:campos.fecha_inicio_plan,fecha_fin_plan:campos.fecha_fin_plan,fecha_inicio_real:"",fecha_fin_real:"",dias_demora:null,cerrada:false});
       await logH(user,"Obra reasignada",`[${equipo.codigo}] → "${obraNueva?.nombre}"`);
+    } else if(!hayAsigActiva) {
+      // No hay asignación activa — crear la primera
+      const obraActual=obras.find(o=>o.id===equipo.obra_id);
+      await db.insert("asignaciones",{equipo_id:equipo.id,equipo_codigo:equipo.codigo,equipo_nombre:equipo.nombre,obra_id:equipo.obra_id,obra_nombre:obraActual?.nombre||"",fecha_inicio_plan:campos.fecha_inicio_plan,fecha_fin_plan:campos.fecha_fin_plan,fecha_inicio_real:campos.fecha_inicio_real,fecha_fin_real:campos.fecha_fin_real,dias_demora:null,cerrada:false});
+    } else {
+      // Actualizar fechas de la asignación activa
+      await db.update("asignaciones",asigActiva[0].id,{fecha_inicio_plan:campos.fecha_inicio_plan,fecha_fin_plan:campos.fecha_fin_plan,fecha_inicio_real:campos.fecha_inicio_real,fecha_fin_real:campos.fecha_fin_real});
     }
+
     await db.update("equipos",equipo.id,d);
     if(campos.estado!==equipo.estado)await logH(user,"Estado actualizado",`[${equipo.codigo}] "${equipo.estado}" → "${campos.estado}"`);
     if(campos.responsable!==equipo.responsable)await logH(user,"Responsable asignado",`[${equipo.codigo}] "${equipo.responsable||"ninguno"}" → "${campos.responsable||"ninguno"}"`);
-    await recargar();setEditando(false);setLoad(false);
+    await recargar();
+    // Recargar asignaciones del equipo
+    const nuevasAsig=await db.get("asignaciones",`&equipo_id=eq.${equipo.id}&order=id.desc`);
+    setAsignaciones(Array.isArray(nuevasAsig)?nuevasAsig:[]);
+    setEditando(false);setLoad(false);
   };
   const guardarCi=async()=>{setLoad(true);const r=await db.insert("registros_estado",{equipo_id:equipo.id,tipo:ci.tipo,observaciones:ci.observaciones,foto_nombre:ci.fotoNombre,cargado_por:user.nombre,rol});setRegs(p=>[...p,...(Array.isArray(r)?r:[r])]);await logH(user,"Check-in registrado",`[${equipo.codigo}] ${ci.tipo==="entrada"?"Recepción":"Devolución"}${ci.fotoNombre?` · 📷 ${ci.fotoNombre}`:""}`);if(ci.fotoNombre)await logH(user,"Foto cargada",`[${equipo.codigo}] ${ci.tipo==="entrada"?"Estado inicial":"Estado final"}: ${ci.fotoNombre}`);setCi({tipo:"entrada",observaciones:"",fotoNombre:""});setShowCi(false);setLoad(false);};
   const guardarFalla=async()=>{if(!nf.descripcion.trim())return;setLoad(true);const fecha=new Date().toLocaleDateString("es-AR");const r=await db.insert("fallas",{equipo_id:equipo.id,descripcion:nf.descripcion,prioridad:nf.prioridad,estado:"Pendiente",reportado_por:nf.reportado_por,nota_mecanico:"",fecha});setFallas(p=>[...p,...(Array.isArray(r)?r:[r])]);await logH(user,"Falla reportada",`[${equipo.codigo}] "${nf.descripcion}" · ${nf.prioridad}`);setNf({descripcion:"",prioridad:"Media",reportado_por:user.nombre});setShowFalla(false);setLoad(false);};
@@ -507,7 +522,13 @@ export default function App(){
 
   const agregarEq=async()=>{
     if(!nEq.codigo||!nEq.nombre)return;
-    await db.insert("equipos",{...nEq,horas_uso:Number(nEq.horas_uso),obra_id:Number(nEq.obra_id)});
+    const res=await db.insert("equipos",{...nEq,horas_uso:Number(nEq.horas_uso),obra_id:Number(nEq.obra_id)});
+    const eq=Array.isArray(res)?res[0]:res;
+    // Crear asignación inicial
+    if(eq?.id){
+      const obraActual=obras.find(o=>o.id===Number(nEq.obra_id));
+      await db.insert("asignaciones",{equipo_id:eq.id,equipo_codigo:nEq.codigo,equipo_nombre:nEq.nombre,obra_id:Number(nEq.obra_id),obra_nombre:obraActual?.nombre||"",fecha_inicio_plan:"",fecha_fin_plan:"",fecha_inicio_real:"",fecha_fin_real:"",dias_demora:null,cerrada:false});
+    }
     await logH(user,"Equipo agregado",`${nEq.codigo} · ${nEq.nombre}`);
     await cargarEquipos();setShowNEq(false);
     setNEq({codigo:"",nombre:"",tipo:TIPOS[0],obra_id:1,estado:"Disponible",responsable:"",horas_uso:0,ultimo_service:"",observaciones:""});
