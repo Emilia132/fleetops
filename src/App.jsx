@@ -345,6 +345,8 @@ function DetalleEquipo({equipo,obras,user,onClose,recargar}){
         </div>;
       })}
     </div>}
+
+    {tab==="estado"&&<div>
       <p style={{fontSize:13,color:"#6b7280",marginTop:0,marginBottom:16}}>{puede.cargarFotos(rol)?"Registrá el estado del equipo al entregarlo o recibirlo.":"Historial de registros de estado."}</p>
       {/* Fechas reales - maquinista y admin */}
       {(rol==="maquinista"||rol==="administrador")&&<div style={{background:"#f0fdf4",borderRadius:12,padding:14,border:"1px solid #bbf7d0",marginBottom:16}}>
