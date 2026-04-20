@@ -37,6 +37,7 @@ const puede = {
   agregarEquipo:  r=>r==="administrador",
   gestionarUsers: r=>r==="administrador",
   gestionarObras: r=>r==="administrador",
+  verPlanificacion:r=>true,
 };
 
 async function logH(user, accion, detalle) {
@@ -248,13 +249,39 @@ function DetalleEquipo({equipo,obras,user,onClose,recargar}){
   const fRef=useRef();const[showFalla,setShowFalla]=useState(false);const[nf,setNf]=useState({descripcion:"",prioridad:"Media",reportado_por:user.nombre});
   const[notas,setNotas]=useState({});const[load,setLoad]=useState(false);
 
-  const guardar=async()=>{setLoad(true);const d={responsable:campos.responsable,obra_id:Number(campos.obra_id),estado:campos.estado,observaciones:campos.observaciones,horas_uso:Number(campos.horas_uso),fecha_inicio_plan:campos.fecha_inicio_plan,fecha_fin_plan:campos.fecha_fin_plan,fecha_inicio_real:campos.fecha_inicio_real,fecha_fin_real:campos.fecha_fin_real};await db.update("equipos",equipo.id,d);if(campos.estado!==equipo.estado)await logH(user,"Estado actualizado",`[${equipo.codigo}] "${equipo.estado}" → "${campos.estado}"`);if(campos.responsable!==equipo.responsable)await logH(user,"Responsable asignado",`[${equipo.codigo}] "${equipo.responsable||"ninguno"}" → "${campos.responsable||"ninguno"}"`);if(Number(campos.obra_id)!==equipo.obra_id)await logH(user,"Datos editados",`[${equipo.codigo}] Obra → "${obras.find(o=>o.id===Number(campos.obra_id))?.nombre}"`);await recargar();setEditando(false);setLoad(false);};
+  const guardar=async()=>{
+    setLoad(true);
+    const obraChanged = Number(campos.obra_id)!==equipo.obra_id;
+    const d={responsable:campos.responsable,obra_id:Number(campos.obra_id),estado:campos.estado,observaciones:campos.observaciones,horas_uso:Number(campos.horas_uso),fecha_inicio_plan:campos.fecha_inicio_plan,fecha_fin_plan:campos.fecha_fin_plan,fecha_inicio_real:campos.fecha_inicio_real,fecha_fin_real:campos.fecha_fin_real};
+    // Si cambia de obra: cerrar asignación anterior y abrir nueva
+    if(obraChanged){
+      // Cerrar asignación activa anterior
+      const asigActiva=await db.get("asignaciones",`&equipo_id=eq.${equipo.id}&cerrada=eq.false`);
+      if(Array.isArray(asigActiva)&&asigActiva.length>0){
+        const a=asigActiva[0];
+        const diffDias=(x,y)=>x&&y?Math.round((new Date(y)-new Date(x))/(1000*60*60*24)):null;
+        const demora=diffDias(a.fecha_fin_plan,equipo.fecha_fin_real);
+        await db.update("asignaciones",a.id,{cerrada:true,fecha_inicio_real:equipo.fecha_inicio_real||"",fecha_fin_real:equipo.fecha_fin_real||"",dias_demora:demora});
+      }
+      // Abrir nueva asignación
+      const obraNueva=obras.find(o=>o.id===Number(campos.obra_id));
+      await db.insert("asignaciones",{equipo_id:equipo.id,equipo_codigo:equipo.codigo,equipo_nombre:equipo.nombre,obra_id:Number(campos.obra_id),obra_nombre:obraNueva?.nombre||"",fecha_inicio_plan:campos.fecha_inicio_plan,fecha_fin_plan:campos.fecha_fin_plan,fecha_inicio_real:"",fecha_fin_real:"",cerrada:false});
+      await logH(user,"Obra reasignada",`[${equipo.codigo}] → "${obraNueva?.nombre}"`);
+    }
+    await db.update("equipos",equipo.id,d);
+    if(campos.estado!==equipo.estado)await logH(user,"Estado actualizado",`[${equipo.codigo}] "${equipo.estado}" → "${campos.estado}"`);
+    if(campos.responsable!==equipo.responsable)await logH(user,"Responsable asignado",`[${equipo.codigo}] "${equipo.responsable||"ninguno"}" → "${campos.responsable||"ninguno"}"`);
+    await recargar();setEditando(false);setLoad(false);
+  };
   const guardarCi=async()=>{setLoad(true);const r=await db.insert("registros_estado",{equipo_id:equipo.id,tipo:ci.tipo,observaciones:ci.observaciones,foto_nombre:ci.fotoNombre,cargado_por:user.nombre,rol});setRegs(p=>[...p,...(Array.isArray(r)?r:[r])]);await logH(user,"Check-in registrado",`[${equipo.codigo}] ${ci.tipo==="entrada"?"Recepción":"Devolución"}${ci.fotoNombre?` · 📷 ${ci.fotoNombre}`:""}`);if(ci.fotoNombre)await logH(user,"Foto cargada",`[${equipo.codigo}] ${ci.tipo==="entrada"?"Estado inicial":"Estado final"}: ${ci.fotoNombre}`);setCi({tipo:"entrada",observaciones:"",fotoNombre:""});setShowCi(false);setLoad(false);};
   const guardarFalla=async()=>{if(!nf.descripcion.trim())return;setLoad(true);const fecha=new Date().toLocaleDateString("es-AR");const r=await db.insert("fallas",{equipo_id:equipo.id,descripcion:nf.descripcion,prioridad:nf.prioridad,estado:"Pendiente",reportado_por:nf.reportado_por,nota_mecanico:"",fecha});setFallas(p=>[...p,...(Array.isArray(r)?r:[r])]);await logH(user,"Falla reportada",`[${equipo.codigo}] "${nf.descripcion}" · ${nf.prioridad}`);setNf({descripcion:"",prioridad:"Media",reportado_por:user.nombre});setShowFalla(false);setLoad(false);};
   const updFalla=async(id,estado)=>{setLoad(true);const nota=notas[id]||"";const falla=fallas.find(f=>f.id===id);await db.update("fallas",id,{estado,...(nota?{nota_mecanico:nota}:{})});setFallas(p=>p.map(f=>f.id===id?{...f,estado,nota_mecanico:nota||f.nota_mecanico}:f));await logH(user,"Falla actualizada",`[${equipo.codigo}] "${falla.descripcion}" → ${estado}${nota?` · "${nota}"`:""}` );setNotas(p=>({...p,[id]:""}));setLoad(false);};
 
+  const[asignaciones,setAsignaciones]=useState([]);
+  useEffect(()=>{db.get("asignaciones",`&equipo_id=eq.${equipo.id}&order=id.desc`).then(d=>setAsignaciones(Array.isArray(d)?d:[]));},[]); // eslint-disable-line
+
   const fa=fallas.filter(f=>f.estado!=="Resuelto");
-  const tabs=[{id:"info",label:"📋 Info"},{id:"estado",label:`🔍 Estado${regs.length>0?` (${regs.length})` :""}`},{id:"fallas",label:`🔧 Fallas${fa.length>0?` (${fa.length})` :""}`}];
+  const tabs=[{id:"info",label:"📋 Info"},{id:"asig",label:`🏗️ Asignaciones${asignaciones.length>0?` (${asignaciones.length})`:""}`},{id:"estado",label:`🔍 Estado${regs.length>0?` (${regs.length})` :""}`},{id:"fallas",label:`🔧 Fallas${fa.length>0?` (${fa.length})` :""}`}];
 
   return<Modal title={`${equipo.codigo} · ${equipo.nombre}`} onClose={onClose}>
     <div style={{display:"flex",gap:6,marginBottom:20,flexWrap:"wrap"}}>{tabs.map(t=><button key={t.id} onClick={()=>setTab(t.id)} style={{padding:"7px 14px",borderRadius:8,border:"none",background:tab===t.id?"#1e3a5f":"#f3f4f6",color:tab===t.id?"#fff":"#374151",fontWeight:600,fontSize:13,cursor:"pointer"}}>{t.label}</button>)}</div>
@@ -291,7 +318,33 @@ function DetalleEquipo({equipo,obras,user,onClose,recargar}){
       </div>}
     </div>}
 
-    {tab==="estado"&&<div>
+    {tab==="asig"&&<div>
+      <p style={{fontSize:13,color:"#6b7280",marginTop:0,marginBottom:16}}>Historial completo de todas las obras donde estuvo este equipo.</p>
+      {asignaciones.length===0?<div style={{textAlign:"center",color:"#d1d5db",fontSize:13,padding:"24px 0"}}>Sin asignaciones registradas aún.<br/><span style={{fontSize:11}}>Se registran automáticamente al reasignar el equipo a otra obra.</span></div>
+      :asignaciones.map(a=>{
+        const fmt=f=>f?new Date(f+"T00:00:00").toLocaleDateString("es-AR",{day:"2-digit",month:"2-digit",year:"numeric"}):"-";
+        const demora=a.dias_demora;
+        const colorD=demora===null||demora===undefined?null:demora===0?"#22c55e":Math.abs(demora)<=3?"#eab308":"#ef4444";
+        const bgD=demora===null||demora===undefined?null:demora===0?"#dcfce7":Math.abs(demora)<=3?"#fef9c3":"#fee2e2";
+        const textoD=demora===null||demora===undefined?"⏳ En curso":demora===0?"✅ En fecha":`${demora>0?"⚠ Atraso":"🟢 Adelanto"} ${Math.abs(demora)} día${Math.abs(demora)!==1?"s":""}`;
+        return<div key={a.id} style={{background:a.cerrada?"#f8fafc":"#eff6ff",borderRadius:12,padding:14,border:`1.5px solid ${a.cerrada?"#e2e8f0":"#bfdbfe"}`,marginBottom:10}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+            <div><div style={{fontWeight:700,fontSize:14,color:"#1e3a5f"}}>📍 {a.obra_nombre}</div><div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>{a.cerrada?"Finalizada":"🔵 Asignación actual"}</div></div>
+            {colorD&&<div style={{background:bgD,color:colorD,borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:700,whiteSpace:"nowrap"}}>{textoD}</div>}
+            {!colorD&&!a.cerrada&&<div style={{background:"#dbeafe",color:"#1e40af",borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:700}}>⏳ En curso</div>}
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            {[{l:"Inicio plan.",v:fmt(a.fecha_inicio_plan)},{l:"Fin plan.",v:fmt(a.fecha_fin_plan)},{l:"Inicio real",v:fmt(a.fecha_inicio_real)},{l:"Fin real",v:fmt(a.fecha_fin_real)}].map(({l,v})=>(
+              <div key={l} style={{background:"#fff",borderRadius:8,padding:"7px 10px"}}>
+                <div style={{fontSize:10,color:"#9ca3af",fontWeight:600}}>{l}</div>
+                <div style={{fontSize:13,fontWeight:600,color:"#111"}}>{v}</div>
+              </div>
+            ))}
+          </div>
+          {a.notas&&<div style={{marginTop:8,fontSize:12,color:"#374151",background:"#fff",borderRadius:8,padding:"7px 10px"}}>📝 {a.notas}</div>}
+        </div>;
+      })}
+    </div>}
       <p style={{fontSize:13,color:"#6b7280",marginTop:0,marginBottom:16}}>{puede.cargarFotos(rol)?"Registrá el estado del equipo al entregarlo o recibirlo.":"Historial de registros de estado."}</p>
       {/* Fechas reales - maquinista y admin */}
       {(rol==="maquinista"||rol==="administrador")&&<div style={{background:"#f0fdf4",borderRadius:12,padding:14,border:"1px solid #bbf7d0",marginBottom:16}}>
@@ -348,6 +401,91 @@ function DetalleEquipo({equipo,obras,user,onClose,recargar}){
   </Modal>;
 }
 
+function PlanificacionView({equipos,obras,onVerEquipo}){
+  const fmt=f=>f?new Date(f+"T00:00:00").toLocaleDateString("es-AR",{day:"2-digit",month:"2-digit",year:"numeric"}):"-";
+  const hoy=new Date();
+  const diasHasta=f=>{if(!f)return null;const d=new Date(f+"T00:00:00");return Math.round((d-hoy)/(1000*60*60*24));};
+
+  const disponibles=equipos.filter(e=>e.estado==="Disponible");
+  const enObra=equipos.filter(e=>e.estado==="Operativo"||e.estado==="En mantenimiento");
+  const fueraServicio=equipos.filter(e=>e.estado==="Fuera de servicio");
+
+  // Agrupar equipos en obra por obra
+  const porObra=obras.map(o=>({obra:o,equipos:enObra.filter(e=>e.obra_id===o.id)})).filter(x=>x.equipos.length>0);
+
+  return<div>
+    <h3 style={{margin:"0 0 6px",fontSize:15,fontWeight:700,color:"#1e3a5f"}}>📊 Planificación de equipos</h3>
+    <p style={{fontSize:13,color:"#6b7280",marginTop:0,marginBottom:20}}>Visualizá la disponibilidad y fechas de liberación de toda la flota.</p>
+
+    {/* Resumen rápido */}
+    <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:20}}>
+      {[{l:"Disponibles ahora",v:disponibles.length,c:"#1e40af",b:"#dbeafe",e:"✅"},{l:"En obra",v:enObra.length,c:"#166534",b:"#dcfce7",e:"🏗️"},{l:"Fuera de servicio",v:fueraServicio.length,c:"#991b1b",b:"#fee2e2",e:"🔴"}].map(s=>(
+        <div key={s.l} style={{background:s.b,borderRadius:12,padding:"12px 10px",textAlign:"center"}}>
+          <div style={{fontSize:22,marginBottom:2}}>{s.e}</div>
+          <div style={{fontSize:22,fontWeight:800,color:s.c}}>{s.v}</div>
+          <div style={{fontSize:10,fontWeight:600,color:s.c,opacity:0.8}}>{s.l}</div>
+        </div>
+      ))}
+    </div>
+
+    {/* Equipos disponibles */}
+    {disponibles.length>0&&<div style={{marginBottom:20}}>
+      <div style={{fontSize:13,fontWeight:700,color:"#1e40af",marginBottom:10}}>✅ Disponibles para asignar</div>
+      <div style={{display:"grid",gap:8}}>
+        {disponibles.map(e=><div key={e.id} onClick={()=>onVerEquipo(e)} style={{background:"#fff",borderRadius:10,padding:"10px 14px",border:"1.5px solid #bfdbfe",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div><div style={{fontWeight:700,fontSize:13,color:"#111"}}>{e.codigo} · {e.nombre}</div><div style={{fontSize:11,color:"#6b7280",marginTop:2}}>{e.tipo}</div></div>
+          <span style={{background:"#dbeafe",color:"#1e40af",borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:700}}>Libre</span>
+        </div>)}
+      </div>
+    </div>}
+
+    {/* Línea de tiempo por obra */}
+    <div style={{fontSize:13,fontWeight:700,color:"#374151",marginBottom:12}}>🏗️ Equipos en obra — fechas de liberación estimada</div>
+    {porObra.length===0?<div style={{textAlign:"center",color:"#d1d5db",fontSize:13,padding:"20px 0"}}>Sin equipos asignados a obras</div>
+    :porObra.map(({obra,equipos:eqs})=>(
+      <div key={obra.id} style={{background:"#fff",borderRadius:14,border:"1px solid #e5e7eb",marginBottom:12,overflow:"hidden"}}>
+        <div style={{background:"#1e3a5f",padding:"10px 16px"}}>
+          <div style={{color:"#fff",fontWeight:700,fontSize:14}}>📍 {obra.nombre}</div>
+          <div style={{color:"#93c5fd",fontSize:11,marginTop:2}}>{eqs.length} equipo{eqs.length!==1?"s":""} asignado{eqs.length!==1?"s":""}</div>
+        </div>
+        <div style={{padding:12,display:"grid",gap:8}}>
+          {eqs.map(e=>{
+            const dias=diasHasta(e.fecha_fin_plan);
+            const color=dias===null?"#9ca3af":dias<0?"#ef4444":dias<=7?"#f97316":dias<=30?"#eab308":"#22c55e";
+            const bg=dias===null?"#f3f4f6":dias<0?"#fee2e2":dias<=7?"#fff7ed":dias<=30?"#fef9c3":"#dcfce7";
+            const texto=dias===null?"Sin fecha plan.":dias<0?`Vencido hace ${Math.abs(dias)}d`:dias===0?"Libera hoy":`Libera en ${dias}d`;
+            return<div key={e.id} onClick={()=>onVerEquipo(e)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",background:"#f8fafc",borderRadius:9,cursor:"pointer",border:"1px solid #e5e7eb"}}>
+              <div>
+                <div style={{fontWeight:700,fontSize:13,color:"#111"}}>{e.codigo} · {e.nombre}</div>
+                <div style={{fontSize:11,color:"#6b7280",marginTop:1}}>
+                  {e.responsable&&`👷 ${e.responsable} · `}
+                  Fin plan: <b>{fmt(e.fecha_fin_plan)}</b>
+                  {e.fecha_fin_real&&<> · Fin real: <b>{fmt(e.fecha_fin_real)}</b></>}
+                </div>
+              </div>
+              <div style={{background:bg,color,borderRadius:20,padding:"4px 10px",fontSize:11,fontWeight:700,whiteSpace:"nowrap",marginLeft:10}}>{texto}</div>
+            </div>;
+          })}
+        </div>
+      </div>
+    ))}
+
+    {/* Fuera de servicio */}
+    {fueraServicio.length>0&&<div style={{marginTop:8}}>
+      <div style={{fontSize:13,fontWeight:700,color:"#991b1b",marginBottom:10}}>🔴 Fuera de servicio</div>
+      <div style={{display:"grid",gap:8}}>
+        {fueraServicio.map(e=>{
+          const fallasActivas=e.fallas?.filter(f=>f.estado!=="Resuelto").length||0;
+          return<div key={e.id} onClick={()=>onVerEquipo(e)} style={{background:"#fff",borderRadius:10,padding:"10px 14px",border:"1.5px solid #fca5a5",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div><div style={{fontWeight:700,fontSize:13,color:"#111"}}>{e.codigo} · {e.nombre}</div><div style={{fontSize:11,color:"#6b7280",marginTop:2}}>{e.tipo}{fallasActivas>0&&` · ⚠ ${fallasActivas} falla${fallasActivas>1?"s":""}`}</div></div>
+            <span style={{background:"#fee2e2",color:"#991b1b",borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:700}}>Fuera de servicio</span>
+          </div>;
+        })}
+      </div>
+    </div>}
+  </div>;
+}
+
 export default function App(){
   const[user,setUser]=useState(null);const[obras,setObras]=useState([]);const[usuarios,setUsuarios]=useState([]);const[equipos,setEquipos]=useState([]);const[hist,setHist]=useState([]);const[load,setLoad]=useState(true);
   const[vista,setVista]=useState("tablero");const[busq,setBusq]=useState("");const[fEst,setFEst]=useState("Todos");const[fObra,setFObra]=useState("Todas");const[eqSel,setEqSel]=useState(null);const[showNEq,setShowNEq]=useState(false);
@@ -379,7 +517,7 @@ export default function App(){
   const rol=user.rol;
   const eqF=equipos.filter(e=>{const q=busq.toLowerCase();return(e.nombre.toLowerCase().includes(q)||e.codigo.toLowerCase().includes(q)||(e.responsable||"").toLowerCase().includes(q))&&(fEst==="Todos"||e.estado===fEst)&&(fObra==="Todas"||e.obra_id===Number(fObra));});
   const stats={total:equipos.length,op:equipos.filter(e=>e.estado==="Operativo").length,mant:equipos.filter(e=>e.estado==="En mantenimiento").length,fall:equipos.filter(e=>e.fallas?.some(f=>f.estado!=="Resuelto")).length};
-  const nav=[{id:"tablero",label:"📋 Tablero"},{id:"mapa",label:"🗺️ Mapa"},{id:"fallas",label:`🔧 Fallas${stats.fall>0?` (${stats.fall})`:""}`},...(puede.verHistorial(rol)?[{id:"hist",label:"📒 Historial"}]:[]),...(puede.gestionarUsers(rol)?[{id:"users",label:"👥 Usuarios"}]:[]),...(puede.gestionarObras(rol)?[{id:"obras",label:"🏗️ Obras"}]:[])];
+  const nav=[{id:"tablero",label:"📋 Tablero"},{id:"mapa",label:"🗺️ Mapa"},{id:"planif",label:"📊 Planificación"},{id:"fallas",label:`🔧 Fallas${stats.fall>0?` (${stats.fall})`:""}`},...(puede.verHistorial(rol)?[{id:"hist",label:"📒 Historial"}]:[]),...(puede.gestionarUsers(rol)?[{id:"users",label:"👥 Usuarios"}]:[]),...(puede.gestionarObras(rol)?[{id:"obras",label:"🏗️ Obras"}]:[])];
 
   return<div style={{fontFamily:"'Trebuchet MS',sans-serif",background:"#f0f4f8",minHeight:"100vh"}}>
     <div style={{background:"linear-gradient(135deg,#1e3a5f,#0f2027)",padding:"13px 20px",display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,zIndex:100}}>
@@ -417,6 +555,7 @@ export default function App(){
         </div>)}
       </div>}
 
+      {vista==="planif"&&<PlanificacionView equipos={equipos} obras={obras} onVerEquipo={setEqSel}/>}
       {vista==="hist"&&puede.verHistorial(rol)&&<Historial historial={hist} recargar={cargarHist}/>}
       {vista==="users"&&puede.gestionarUsers(rol)&&<GestionUsuarios usuarios={usuarios} recargar={cargarUsuarios} user={user}/>}
       {vista==="obras"&&puede.gestionarObras(rol)&&<GestionObras obras={obras} recargar={cargarObras} user={user}/>}
